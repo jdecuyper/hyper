@@ -41,6 +41,18 @@ class ProtocolError(HTTP20Error):
     pass
 
 
+class ALPNFailureError(HTTP20Error):
+    """
+    The ALPN/NPN negotiation has returned a protocol that hyper doesn't
+    support.
+    """
+    def __init__(self, actual_protocol, connection):
+        super(ALPNFailureError, self).__init__()
+
+        self.actual_protocol = actual_protocol
+        self.connection = connection
+
+
 # Create our own ConnectionResetError.
 try:  # pragma: no cover
     ConnectionResetError = ConnectionResetError

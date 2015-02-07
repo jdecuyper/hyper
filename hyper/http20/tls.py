@@ -8,6 +8,7 @@ Contains the TLS/SSL logic for use in hyper.
 import os.path as path
 
 from ..compat import ignore_missing, ssl
+from .exceptions import ALPNFailureError
 
 
 NPN_PROTOCOL = 'h2-16'
@@ -41,7 +42,8 @@ def wrap_socket(sock, server_hostname):
         ssl.match_hostname(ssl_sock.getpeercert(), server_hostname)
 
     with ignore_missing():
-        assert ssl_sock.selected_npn_protocol() in H2_NPN_PROTOCOLS
+        if not ssl_sock.selected_npn_protocol() in H2_NPN_PROTOCOLS:
+            raise ALPNFailureError(ssl_sock.selected_npn_protocol(), ssl_sock)
 
     return ssl_sock
 

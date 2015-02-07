@@ -16,18 +16,28 @@ except ImportError:  # pragma: no cover
 
 from hyper import HTTP20Connection
 from hyper.compat import urlparse
+from hyper.http20.exceptions import ALPNFailureError
 
 class HTTP20Adapter(HTTPAdapter):
     """
     A Requests Transport Adapter that uses hyper to send requests over
     HTTP/2. This implements some degree of connection pooling to maximise the
     HTTP/2 gain.
+
+    This class very explicitly does not do proper overloading of the
+    HTTPAdapter methods. This is to ensure that we can fall back to HTTP/1.1
+    behaviour.
     """
     def __init__(self, *args, **kwargs):
+        super(HTTP20Adapter, self).__init__(*args, **kwargs)
+
         #: A mapping between HTTP netlocs and ``HTTP20Connection`` objects.
         self.connections = {}
 
-    def get_connection(self, netloc):
+        #: An indication of which hosts do not support HTTP/2 connections.
+        self.invalid_hosts = set()
+
+    def h2_get_connection(self, netloc, proxies=None):
         """
         Gets an appropriate HTTP/2 connection object based on netloc.
         """
@@ -45,29 +55,44 @@ class HTTP20Adapter(HTTPAdapter):
         """
         parsed = urlparse(request.url)
 
-        conn = self.get_connection(parsed.netloc)
+        # If we know this host doesn't support HTTP/2, don't bother trying.
+        if parsed.netloc in self.invalid_hosts:
+            return super(HTTP20Adapter, self).send(request, stream, **kwargs)
+
+        conn = self.h2_get_connection(parsed.netloc)
 
         # Build the selector.
         selector = parsed.path
         selector += '?' + parsed.query if parsed.query else ''
         selector += '#' + parsed.fragment if parsed.fragment else ''
 
-        stream_id = conn.request(
-            request.method,
-            selector,
-            request.body,
-            request.headers
-        )
+        try:
+            stream_id = conn.request(
+                request.method,
+                selector,
+                request.body,
+                request.headers
+            )
+        except ALPNFailureError as e:
+            # We failed to negotiate HTTP/2. If we negotiated HTTP/1.1, then
+            # fall back to standard adapter processing.
+            if e.actual_protocol and e.actual_protocol != 'http/1.1':  # pragma: no cover
+                raise
+
+            self.invalid_hosts.add(parsed.netloc)
+
+            return super(HTTP20Adapter, self).send(request, stream, **kwargs)
+
         resp = conn.getresponse(stream_id)
 
-        r = self.build_response(request, resp)
+        r = self.h2_build_response(request, resp)
 
         if not stream:
             r.content
 
         return r
 
-    def build_response(self, request, resp):
+    def h2_build_response(self, request, resp):
         """
         Builds a Requests' response object.  This emulates most of the logic of
         the standard fuction but deals with the lack of the ``.headers``
