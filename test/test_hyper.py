@@ -2,7 +2,7 @@
 from hyper.packages.hyperframe.frame import (
     Frame, DataFrame, RstStreamFrame, SettingsFrame,
     PushPromiseFrame, PingFrame, WindowUpdateFrame, HeadersFrame,
-    ContinuationFrame, BlockedFrame, GoAwayFrame,
+    ContinuationFrame, BlockedFrame, GoAwayFrame, FRAME_MAX_LEN
 )
 from hyper.packages.hpack.hpack_compat import Encoder, Decoder
 from hyper.http20.connection import HTTP20Connection
@@ -195,6 +195,7 @@ class TestHyperConnection(object):
         assert c.decoder is not decoder
         assert c._settings == {
             SettingsFrame.INITIAL_WINDOW_SIZE: 65535,
+            SettingsFrame.SETTINGS_MAX_FRAME_SIZE: FRAME_MAX_LEN,
         }
         assert c._out_flow_control_window == 65535
         assert c.window_manager is not wm

@@ -12,7 +12,7 @@ from ..common.headers import HTTPHeaderMap
 from ..packages.hyperframe.frame import (
     FRAMES, DataFrame, HeadersFrame, PushPromiseFrame, RstStreamFrame,
     SettingsFrame, Frame, WindowUpdateFrame, GoAwayFrame, PingFrame,
-    BlockedFrame, FRAME_MAX_LEN, FRAME_MAX_ALLOWED_LEN
+    BlockedFrame, FRAME_MAX_LEN
 )
 from ..packages.hpack.hpack_compat import Encoder, Decoder
 from .stream import Stream
@@ -376,7 +376,7 @@ class HTTP20Connection(object):
             if 'ACK' not in frame.flags:
                 self._update_settings(frame)
 
-                # Need to return an ack.
+                # Need to return an ack.
                 f = SettingsFrame(0)
                 f.flags.add('ACK')
                 self._send_cb(f)
@@ -436,14 +436,12 @@ class HTTP20Connection(object):
             self._out_flow_control_window += delta
 
             self._settings[SettingsFrame.INITIAL_WINDOW_SIZE] = newsize
-            
+        
         if SettingsFrame.SETTINGS_MAX_FRAME_SIZE in frame.settings:
             new_size = frame.settings[SettingsFrame.SETTINGS_MAX_FRAME_SIZE]
-            if new_size > FRAME_MAX_LEN and new_size < FRAME_MAX_ALLOWED_LEN:
-                self._settings[SettingsFrame.SETTINGS_MAX_FRAME_SIZE] = new_size
-            #else
-                #connection error (Section 5.4.1) of type PROTOCOL_ERROR.            
-                
+
+            self._settings[SettingsFrame.SETTINGS_MAX_FRAME_SIZE] = new_size
+
     def _new_stream(self, stream_id=None, local_closed=False):
         """
         Returns a new stream object for this connection.
@@ -464,13 +462,8 @@ class HTTP20Connection(object):
         """
         Called by a stream when it would like to be 'closed'.
         """
-        #if error_code is not None:
-        self._send_rst_frame(stream_id, error_code)
-            #f = RstStreamFrame(stream_id)
-            #f.error_code = error_code
-            #self._send_cb(f)
-
-        #del self.streams[stream_id]
+        if error_code is not None:
+            self._send_rst_frame(stream_id, error_code)
 
     def _send_cb(self, frame, tolerate_peer_gone=False):
         """
@@ -530,24 +523,23 @@ class HTTP20Connection(object):
 
         # Parse the header. We can use the returned memoryview directly here.
         frame, length = Frame.parse_frame_header(header)
-
         
         frame_size = self._settings[SettingsFrame.SETTINGS_MAX_FRAME_SIZE]
-        
-        #print("---")
-        #print("frame_size: %d", frame_size)
-        #print("---")
-        #print("length: %d", length)
-        
         if (length > frame_size):
             self._send_rst_frame(frame.stream_id, 6) # 6 = FRAME_SIZE_ERROR
             log.warning(
                 "Frame size exceeded on stream %d (received: %d, max: %d)",
-                frame.stream_id,
+                stream_id,
                 length,
                 frame_size
             )
 
+        print("--- reading frame length...")
+        print(length)
+        print("--- max frame length...")
+        print(frame_size)
+        print("---...")
+        
         # Read the remaining data from the socket.
         data = self._recv_payload(length)
         self._consume_frame_payload(frame, data)
@@ -608,10 +600,7 @@ class HTTP20Connection(object):
                 # the ENABLE_PUSH setting is 0, but the spec leaves the client
                 # action undefined when they do it anyway. So we just refuse
                 # the stream and go about our business.
-                self._send_rst_frame(frame.promised_stream_id, 7)
-                #f = RstStreamFrame(frame.promised_stream_id)
-                #f.error_code = 7 # REFUSED_STREAM
-                #self._send_cb(f)
+                self._send_rst_frame(frame.promised_stream_id, 7) # REFUSED_STREAM
 
         # Work out to whom this frame should go.
         if frame.stream_id != 0:
@@ -620,10 +609,7 @@ class HTTP20Connection(object):
             except KeyError:
                 # If we receive an unexpected stream identifier then we
                 # cancel the stream with an error of type PROTOCOL_ERROR
-                self._send_rst_frame(frame.stream_id, 1)
-                #f = RstStreamFrame(frame.stream_id)
-                #f.error_code = 1 # PROTOCOL_ERROR
-                #self._send_cb(f)
+                self._send_rst_frame(frame.stream_id, 1) # PROTOCOL_ERROR
                 log.warning(
                     "Unexpected stream identifier %d" % (frame.stream_id)
                 )
@@ -656,23 +642,13 @@ class HTTP20Connection(object):
         """
             Send reset stream frame with error code and remove stream from map.
         """
-        if error_code is not None:
-            f = RstStreamFrame(stream_id)
-            f.error_code = error_code
-            self._send_cb(f)
+        f = RstStreamFrame(stream_id)
+        f.error_code = error_code
+        self._send_cb(f)
         
-        print("---")
-        for stream in list(self.streams.values()):
-            print("stream_id %d" % stream.stream_id)
-
-        try:
-            del self.streams[stream_id]
-        except KeyError as e:  # pragma: no cover
-            log.warn(
-                "Stream with id %d could not be deletedd: %s",
-                stream_id, e)    
-
-
+        #if stream_id > 0:
+        #    del self.streams[stream_id]
+        
     # The following two methods are the implementation of the context manager
     # protocol.
     def __enter__(self):
